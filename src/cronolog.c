@@ -91,7 +91,7 @@
 #ifndef _WIN32
 #define VERSION_MSG   	PACKAGE " version " VERSION "\n"
 #else
-#define VERSION_MSG      "cronolog version 0.1\n"
+#define VERSION_MSG      "cronolog version " VERSION "\n"
 #endif
 
 
@@ -321,6 +321,7 @@ main(int argc, char **argv)
 	    {
 		if (errno == EINTR)
 		{
+			//EINTR	4	Interrupted system call
 		    continue;
 		}
 		exit(4);

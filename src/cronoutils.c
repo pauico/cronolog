@@ -74,10 +74,13 @@
 #include "cronoutils.h"
 /*extern char *tzname[2];*/
 
-
 #ifdef _WIN32
-#include "strptime.h"
+#include <winsock2.h> // Provides fd_set, select, FD_ZERO, etc.
+#include "strptime.h" // https://github.com/treeswift/strptime
 #endif
+
+
+
 /* debug_file is the file to output debug messages to.  No debug
  * messages are output if it is set to NULL. 
  */
@@ -135,8 +138,19 @@ new_log_file(const char *template, const char *linkname, mode_t linktype, const 
     struct tm 	*tm;
     int 	log_fd;
 
+DEBUG((">: new_log_file :\n"));
+
     start_of_period = start_of_this_period(time_now, periodicity, period_multiple);
     tm = localtime(&start_of_period);
+	// FIX: Check for NULL pointer return from localtime()
+    if (tm == NULL)
+    {
+        // This is a fatal error, we must exit gracefully
+        fprintf(stderr, "Fatal error: localtime() returned NULL (Time conversion failed).\n");
+        exit(1); 
+    }
+    
+    // Original code continues here, now safe:
     strftime(pfilename, BUFSIZE, template, tm);
     *pnext_period = start_of_next_period(start_of_period, periodicity, period_multiple) + period_delay;
     
@@ -146,13 +160,29 @@ new_log_file(const char *template, const char *linkname, mode_t linktype, const 
 	   timestamp(*pnext_period), *pnext_period,
 	   *pnext_period - time_now));
     
-    log_fd = open(pfilename, O_WRONLY|O_CREAT|O_APPEND|O_LARGEFILE, FILE_MODE);
+	#ifdef _WIN32
+		log_fd = open(pfilename, O_WRONLY|O_CREAT|O_APPEND, FILE_MODE);
+	#else
+		log_fd = open(pfilename, O_WRONLY|O_CREAT|O_APPEND|O_LARGEFILE, FILE_MODE);
+	#endif
     
 #ifndef DONT_CREATE_SUBDIRS
+	#ifdef _WIN32
+	// FIX: Check for ENOENT, EACCES, or EPERM to correctly trigger sub-directory creation on Windows.
+    if ((log_fd < 0) && (errno == ENOENT || errno == EACCES || errno == EPERM))
+    {
+	DEBUG(("Creating missing components of \"%s\"\n", pfilename)); // Use pfilename instead of filename
+	#else
     if ((log_fd < 0) && (errno == ENOENT))
     {
+	#endif
 	create_subdirs(pfilename);
-	log_fd = open(pfilename, O_WRONLY|O_CREAT|O_APPEND|O_LARGEFILE, FILE_MODE);
+	#ifdef _WIN32
+		// O_LARGEFILE is not needed on Windows
+		log_fd = open(pfilename, O_WRONLY|O_CREAT|O_APPEND, FILE_MODE);
+	#else
+		log_fd = open(pfilename, O_WRONLY|O_CREAT|O_APPEND|O_LARGEFILE, FILE_MODE);
+	#endif
     }
 #endif	    
 
@@ -172,10 +202,12 @@ new_log_file(const char *template, const char *linkname, mode_t linktype, const 
 int
 ready_to_read(int fd, time_t seconds_remaining)
 {
+DEBUG((">: ready_to_read :\n"));
     fd_set set;
     FD_ZERO(&set); /* clear the set */
     FD_SET(fd, &set); /* add our file descriptor to the set */
 
+#ifndef _WIN32
     struct timeval timeout;
     timeout.tv_sec = seconds_remaining;
     timeout.tv_usec = 0;
@@ -187,6 +219,9 @@ ready_to_read(int fd, time_t seconds_remaining)
 	exit(6);
     }
     return rv;
+#else
+	return 1;
+#endif
 }
 
 /* Try to create missing directories on the path of filename.
@@ -204,6 +239,7 @@ ready_to_read(int fd, time_t seconds_remaining)
 void
 create_subdirs(char *filename)
 {
+DEBUG((">: create_subdirs :\n"));
 #ifndef CHECK_ALL_PREFIX_DIRS
     static char	lastpath[MAX_PATH] = "";
 #endif
@@ -212,6 +248,7 @@ create_subdirs(char *filename)
     char	*p;
     
     DEBUG(("Creating missing components of \"%s\"\n", filename));
+
     for (p = filename; (p = strchr(p, '/')); p++)
     {
 	if (p == filename)
@@ -241,12 +278,9 @@ create_subdirs(char *filename)
 	    else
 	    {
 		DEBUG(("Directory \"%s\" does not exist -- creating\n", dirname));
+		// _WIN32 - This call uses the macro: mkdir(P, M) -> _mkdir(P)
 		if ((mkdir(dirname, DIR_MODE) < 0) && (errno != EEXIST))
-#ifndef _WIN32
 		{
-#else
-                if ((mkdir(dirname) < 0) && (errno != EEXIST))
-#endif
 		    perror(dirname);
 		    exit(2);
 		}
@@ -257,7 +291,7 @@ create_subdirs(char *filename)
     strcpy(lastpath, dirname);
 #endif
 }
-
+
 /* Create a hard or symbolic link to a filename according to the type specified.
  *
  * This function could do with more error checking! 
@@ -267,8 +301,10 @@ create_link(char *pfilename,
 	    const char *linkname, mode_t linktype,
 	    const char *prevlinkname)
 {
+DEBUG((">: create_link :\n"));
     struct stat		stat_buf;
-    
+#ifndef _WIN32
+    // Use lstat only on Unix systems where it's correctly defined for symlinks 
     if (prevlinkname && lstat(prevlinkname, &stat_buf) == 0)
     {
 	unlink(prevlinkname);
@@ -282,6 +318,12 @@ create_link(char *pfilename,
 	    unlink(linkname);
 	}
     }
+
+#else
+    // On Windows, true symlinks are not supported by lstat. 
+    // You could try stat() or wstat() here, but the safer approach 
+    // is to simplify the link creation logic for the Windows build.
+#endif
 #ifndef _WIN32
     int result;
     if (linktype == S_IFLNK)
@@ -312,6 +354,7 @@ create_link(char *pfilename,
 PERIODICITY
 determine_periodicity(char *spec)
 {
+DEBUG((">: determine_periodicity :\n"));
     PERIODICITY	periodicity = ONCE_ONLY;
     char 	ch;
     
@@ -412,6 +455,7 @@ determine_periodicity(char *spec)
 PERIODICITY 
 parse_timespec(char *optarg, int *p_period_multiple)
 {
+DEBUG((">: parse_timespec :\n"));
     PERIODICITY		periodicity	= INVALID_PERIOD;
     int			period_multiple = 1;
     char 		*p = optarg;
@@ -481,6 +525,7 @@ parse_timespec(char *optarg, int *p_period_multiple)
 time_t
 start_of_next_period(time_t time_now, PERIODICITY periodicity, int period_multiple)
 {
+DEBUG((">: start_of_next_period :\n"));
     time_t	start_time;
     
     switch (periodicity)
@@ -530,6 +575,7 @@ start_of_next_period(time_t time_now, PERIODICITY periodicity, int period_multip
 time_t
 start_of_this_period(time_t start_time, PERIODICITY periodicity, int period_multiple)
 {
+DEBUG((">: start_of_this_period :\n"));
     struct tm	tm_initial;
     struct tm	tm_adjusted;
     int		expected_mday;
@@ -544,7 +590,7 @@ start_of_this_period(time_t start_time, PERIODICITY periodicity, int period_mult
     {
         memcpy(&tm_initial, tempTime, sizeof(struct tm));
 
-        free(tempTime);
+        //free(tempTime); //memory is managed by the C runtime library
         tempTime = NULL;
     }
 #endif    
@@ -611,7 +657,7 @@ start_of_this_period(time_t start_time, PERIODICITY periodicity, int period_mult
 	{
 	    memcpy(&tm_adjusted, tempTime, sizeof(struct tm));
 	    
-	    free(tempTime);
+	    //free(tempTime);
 	    tempTime = NULL;
 	}
 #endif    
@@ -674,6 +720,7 @@ start_of_this_period(time_t start_time, PERIODICITY periodicity, int period_mult
 time_t
 mktime_from_utc(struct tm *t)
 {
+DEBUG((">: mktime_from_utc :\n"));
    time_t tl, tb;
 
    tl = mktime(t);
@@ -688,6 +735,7 @@ mktime_from_utc(struct tm *t)
 static int
 check_end(const char *p)
 {
+DEBUG((">: check_end :\n"));
    if (!p)
       return 0;
    while (isspace(*p))
@@ -740,6 +788,7 @@ static char *american_date_formats[] =
 time_t
 parse_time(char *time_str, int use_american_date_formats)
 {
+DEBUG((">: parse_time :\n"));
    struct tm    tm;
    char		**date_formats;
    
@@ -780,6 +829,7 @@ print_debug_msg(char *msg, ...)
 char *
 timestamp(time_t thetime)
 {
+DEBUG((">: timestamp :\n"));
     static int	index = 0;
     static char	buffer[4][80];
     struct tm	*tm;

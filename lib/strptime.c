@@ -27,6 +27,16 @@
 # include <config.h>
 #endif
 
+#ifdef _WIN32
+#include "strptime.h"
+#include "LibOb_strptime.h"
+
+const char* strptime(const char* source, const char* format, struct tm* tp) {
+    stTimeZone tz = LibOb_localTimeZone(NULL);
+    return LibOb_strptime(source, format, tp, &tz);
+}
+#else
+	
 #include <ctype.h>
 #include <langinfo.h>
 #include <limits.h>
@@ -732,3 +742,4 @@ strptime (buf, format, tm)
 #endif
   return strptime_internal (buf, format, tm, &decided);
 }
+#endif // _WIN32

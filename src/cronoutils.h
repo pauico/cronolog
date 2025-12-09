@@ -116,8 +116,18 @@
 #define close _close
 #define read  _read
 #define write _write
-#define mkdir _mkdir
 #endif
+
+#ifdef _WIN32
+// On Windows, the mkdir function is _mkdir and only takes the path, 
+// so we map the Unix 2-argument call to the Windows 1-argument call.
+#define mkdir(P,M) _mkdir(P) 
+#else
+// On Unix/Linux, it's just mkdir (or _mkdir depending on platform)
+#define mkdir _mkdir 
+#endif
+
+
 
 #if !HAVE_LOCALIME_R
 struct tm *localtime_r(const time_t *, struct tm *);
