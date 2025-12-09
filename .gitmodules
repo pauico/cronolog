@@ -1,0 +1,3 @@
+[submodule "externals/LibOb_strptime"]
+	path = externals/LibOb_strptime
+	url = https://github.com/OlafSimon/strptime-for-Windows-Linux.git
