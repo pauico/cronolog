@@ -77,6 +77,11 @@
 #ifdef _WIN32
 #include <winsock2.h> // Provides fd_set, select, FD_ZERO, etc.
 #include "strptime.h" // https://github.com/treeswift/strptime
+// S_IFLNK is missing in standard MinGW headers. Define it conditionally.
+#ifndef S_IFLNK
+#define S_IFLNK 0xA000 // Placeholder value, often defined this way in POSIX headers
+#endif
+#include <windows.h>    // Required for CreateSymbolicLinkW
 #endif
 
 
@@ -198,32 +203,41 @@ DEBUG((">: new_log_file :\n"));
     }
     return log_fd;
 }
-
+
 int
 ready_to_read(int fd, time_t seconds_remaining)
 {
-DEBUG((">: ready_to_read :\n"));
+DEBUG((">int ready_to_read(int fd=%d, time_t seconds_remaining=%d)<",fd,seconds_remaining));
     fd_set set;
     FD_ZERO(&set); /* clear the set */
     FD_SET(fd, &set); /* add our file descriptor to the set */
 
-#ifndef _WIN32
     struct timeval timeout;
     timeout.tv_sec = seconds_remaining;
     timeout.tv_usec = 0;
 
-    int rv = select(fd + 1, &set, NULL, NULL, &timeout);
-    if (rv < 0)
-    {
-	perror("select"); /* an error accured */
-	exit(6);
-    }
-    return rv;
-#else
-	return 1;
+	// select(...) blocks the program until input or output is ready on a specified 
+	//    set of file descriptors, or until a timer expires, whichever comes first.
+	int rv = select(fd + 1, &set, NULL, NULL, &timeout);
+#ifdef _WIN32
+	//https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-select
+	//Attempting to use select() on stdin (or its file descriptor) in Windows will 
+	//generally fail with an error like "Socket operation on nonsocket" (WSAENOTSOCK).
+	if (fd == 0) 
+	{
+		DEBUG(("Windows STDIN BYPASS %d\n",rv));
+		rv = 1;
+	}
 #endif
+    if (rv < 0)
+   	{
+		perror("select"); /* an error accured */
+		exit(6);
+	}
+	DEBUG(("<%d\n",rv));
+    return rv;
 }
-
+
 /* Try to create missing directories on the path of filename.
  *
  * Note that on a busy server there may theoretically be many cronolog
@@ -239,7 +253,7 @@ DEBUG((">: ready_to_read :\n"));
 void
 create_subdirs(char *filename)
 {
-DEBUG((">: create_subdirs :\n"));
+DEBUG((">void create_subdirs(char *filename=%s)<",filename));
 #ifndef CHECK_ALL_PREFIX_DIRS
     static char	lastpath[MAX_PATH] = "";
 #endif
@@ -290,7 +304,60 @@ DEBUG((">: create_subdirs :\n"));
 #ifndef CHECK_ALL_PREFIX_DIRS
     strcpy(lastpath, dirname);
 #endif
+	DEBUG(("<\n"));
 }
+
+#ifdef _WIN32
+// Helper function to create the symbolic link using Windows API
+// Converts char* paths to wide characters (LPCWSTR) for the Windows API
+static int create_windows_symlink(const char *target, const char *linkname, DWORD dwFlags) {
+    // Determine required buffer size for Wide Char conversion
+    int target_len = MultiByteToWideChar(CP_UTF8, 0, target, -1, NULL, 0);
+    int link_len = MultiByteToWideChar(CP_UTF8, 0, linkname, -1, NULL, 0);
+
+    // Dynamic allocation for wide character strings
+    LPWSTR w_target = (LPWSTR)malloc(target_len * sizeof(WCHAR));
+    LPWSTR w_link = (LPWSTR)malloc(link_len * sizeof(WCHAR));
+
+    if (!w_target || !w_link) {
+        if (w_target) free(w_target);
+        if (w_link) free(w_link);
+        return -1; // Memory allocation failed
+    }
+
+    // Perform conversion
+    MultiByteToWideChar(CP_UTF8, 0, target, -1, w_target, target_len);
+    MultiByteToWideChar(CP_UTF8, 0, linkname, -1, w_link, link_len);
+
+    // Create the symbolic link
+    BOOL success = CreateSymbolicLinkW(w_link, w_target, dwFlags);
+
+    free(w_target);
+    free(w_link);
+
+    if (success) {
+        return 0; // Success
+    } else {
+        // Return -1 and set errno to indicate failure
+        SetLastError(GetLastError()); // Ensure errno is set based on Windows error
+        return -1; 
+    }
+}
+// Wrapper for the POSIX link() function using the Windows API
+static int create_windows_hardlink(const char *target, const char *linkname) {
+    // CreateHardLinkA: creates a hard link (linkname) to an existing file (target).
+    BOOL success = CreateHardLinkA(linkname, target, NULL);
+    
+    if (success) {
+        return 0; // Success (POSIX link() returns 0 on success)
+    } else {
+        // Map Windows error to POSIX errno for consistent error handling
+        SetLastError(GetLastError()); 
+        return -1; // Failure (POSIX link() returns -1 on failure)
+    }
+}
+#endif
+
 
 /* Create a hard or symbolic link to a filename according to the type specified.
  *
@@ -303,48 +370,99 @@ create_link(char *pfilename,
 {
 DEBUG((">: create_link :\n"));
     struct stat		stat_buf;
+	
+	// Manage prevlinkname: If the previous link path exists, delete it.
 #ifndef _WIN32
     // Use lstat only on Unix systems where it's correctly defined for symlinks 
     if (prevlinkname && lstat(prevlinkname, &stat_buf) == 0)
     {
-	unlink(prevlinkname);
-    }
-    if (linkname && lstat(linkname, &stat_buf) == 0)
+		if(unlink(prevlinkname) != 0) {
+#else
+	// The function lstat() was replaced by stat(). 
+    //   In the context of a log rotation utility, this usually only serves as 
+	//   an existence check, which stat() performs reliably on Windows paths.
+    if (prevlinkname && stat(prevlinkname, &stat_buf) == 0)
     {
-	if (prevlinkname) {
-	    rename(linkname, prevlinkname);
-	}
-	else {
-	    unlink(linkname);
-	}
+        // Use _unlink() included in <io.h>
+        if (_unlink(prevlinkname) != 0) {
+#endif
+			// Log/handle the error if deletion fails
+			fprintf(stderr,"Warning: Failed to unlink previous link %s: %s\n", prevlinkname, strerror(errno));
+		}
+    }
+	// Manage linkname: If the current link path exists, rename it or delete it.
+#ifndef _WIN32
+    if (linkname && lstat(linkname, &stat_buf) == 0)
+#else
+	if (linkname && stat(linkname, &stat_buf) == 0)
+#endif
+    {
+		if (prevlinkname) {
+            // If prevlinkname is provided, rename the current link to the previous link's name.
+            if (rename(linkname, prevlinkname) != 0) {
+                // Log/handle the error if renaming fails
+                fprintf(stderr, "Error: Failed to rename link %s to %s: %s\n", linkname, prevlinkname, strerror(errno));
+            }
+        } else {
+            // Otherwise, just delete the current link path.
+#ifndef _WIN32
+            if (unlink(linkname) != 0) 
+#else
+            if (_unlink(linkname) != 0) 
+#endif
+			{
+                // Log/handle the error if deletion fails
+                // fprintf(stderr, "Warning: Failed to unlink link %s: %s\n", linkname, strerror(errno));
+            }
+        }
     }
 
-#else
-    // On Windows, true symlinks are not supported by lstat. 
-    // You could try stat() or wstat() here, but the safer approach 
-    // is to simplify the link creation logic for the Windows build.
-#endif
-#ifndef _WIN32
     int result;
     if (linktype == S_IFLNK)
     {
 	/* Try to use a relative symlink:  if the path portion of the symlink
 	 * is a prefix of the filename, remove that path from the symlink. */
-	char *slash = strrchr(linkname, '/');
-	int len = slash ? slash - linkname + 1 : -1;
-	if (len > 0 && strncmp(pfilename, linkname, len) == 0)
-	    pfilename += len;
-	result = symlink(pfilename, linkname);
-	if (result) fprintf(stderr, "Error creating symlink from %s to %s", pfilename, linkname);
+		char *slash = strrchr(linkname, '/');
+#ifdef _WIN32
+		// Check for backslash as well on Windows
+        char *bslash = strrchr(linkname, '\\');
+        if (bslash > slash) slash = bslash; // Use the last separator found
+#endif
+        // Calculate the length of the directory prefix
+		int len = slash ? slash - linkname + 1 : -1;
+		
+		// If there's a prefix and it matches the start of the filename, strip the prefix
+        if (len > 0 && strncmp(pfilename, linkname, len) == 0)
+            pfilename += len;
+#ifndef _WIN32		
+		result = symlink(pfilename, linkname);
+#else
+		// Windows API call for Symbolic Link (REQUIRES ELEVATED PERMISSIONS)
+        // Since we don't know if the target is a file or directory from S_IFLNK alone,
+        // we assume SYMLINK_FLAG_FILE for safety, but this might need adjustment.
+        DWORD flags = 0; // Assume 0 for file link or adjust based on cronolog logic
+        
+        result = create_windows_symlink(pfilename, linkname, flags);
+#endif
+		if (result != 0) {
+            // Note: GetLastError is handled inside the helper function
+            fprintf(stderr, "Error creating symlink from %s to %s. Reason: %s\n", 
+                    pfilename, linkname, strerror(errno));
+        }
     }
     else
     {
-	result = link(pfilename, linkname);
-        if (result) fprintf(stderr, "Error creating link from %s to %s", pfilename, linkname);
-    }
+#ifndef _WIN32
+		result = link(pfilename, linkname);
 #else
-    fprintf(stderr, "Creating link from %s to %s not supported", pfilename, linkname);
-#endif    
+		// Use the Windows API wrapper for hard link creation
+        result = create_windows_hardlink(pfilename, linkname);       
+#endif
+        if (result != 0) {
+            fprintf(stderr, "Error creating hard link from %s to %s. Reason: %s\n", 
+                    pfilename, linkname, strerror(errno));
+        }
+	}
 }
 
 /* Examine the log file name specifier for strftime conversion

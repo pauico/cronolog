@@ -5,25 +5,26 @@ CC = gcc
 DEL = del /Q
 RMDIR = rmdir /S /Q
 
-# Define flags and libraries from your successful command
-CFLAGS = -O2 -Ilib
+# --- Configuration ---
+# Include paths for external headers: one for the wrapper and one for the external library
+CFLAGS = -O2 -Ilib -Iexternals/LibOb_strptime/src
 LDFLAGS = -D_WIN32
 LIBS = -lws2_32
+#-lws2_32: This links the Winsock 2.0 32-bit library
 
 # Define output file paths
 TARGET = bin/cronolog.exe
 
-# Define source files (C files)
-# Note: The paths for LibOb_strptime.c are now correctly specified from the root
+# Define source files (C files) with their new, correct paths
 SRCS = src/cronolog.c \
        src/cronoutils.c \
-       lib/LibOb_strptime.c \
-       src/strptime.c
+       lib/strptime.c \
+       externals/LibOb_strptime/src/LibOb_strptime.c 
 
-# Automatically generate a list of object files (.o) in the 'obj' directory
-# The substitution must convert 'lib/' back to 'src/' so the patsubst works with the pattern rules
-OBJS = $(patsubst src/%.c, obj/%.o, $(patsubst lib/%.c, obj/%.o, $(SRCS)))
-# OBJS = obj/cronolog.o obj/cronoutils.o obj/LibOb_strptime.o obj/strptime.o
+# Automatically generate a list of object files (.o) in the 'obj' directory.
+# This uses multiple substitutions to map complex paths to simple object file names.
+OBJS = $(patsubst src/%.c, obj/%.o, $(patsubst lib/%.c, obj/%.o, $(patsubst externals/LibOb_strptime/src/%.c, obj/%.o, $(SRCS))))
+# Resulting OBJS: obj/cronolog.o obj/cronoutils.o obj/strptime.o obj/LibOb_strptime.o
 
 # --- Rules ---
 
@@ -33,7 +34,6 @@ directories:
 	@echo "Ensuring build directories exist..."
 	@if not exist bin mkdir bin
 	@if not exist obj mkdir obj
-	@if not exist lib mkdir lib
 
 # Final Linking Step:
 $(TARGET): $(OBJS)
@@ -47,6 +47,11 @@ obj/%.o: src/%.c
 
 # Pattern Rule 2: For source files located in 'lib/'
 obj/%.o: lib/%.c
+	@echo "Compiling $<..."
+	$(CC) $(CFLAGS) $(LDFLAGS) -c $< -o $@
+
+# Pattern Rule 3: For source files located in 'externals/LibOb_strptime/src/'
+obj/%.o: externals/LibOb_strptime/src/%.c
 	@echo "Compiling $<..."
 	$(CC) $(CFLAGS) $(LDFLAGS) -c $< -o $@
 

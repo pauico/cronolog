@@ -88,10 +88,10 @@
 #ifndef __USE_XOPEN
 #define __USE_XOPEN
 #endif
-#else
-#include <io.h>
+#else // _WIN32
+#include <io.h>		
 #include <direct.h>
-#endif
+#endif // _WIN32
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
