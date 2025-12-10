@@ -77,10 +77,6 @@
 #ifdef _WIN32
 #include <winsock2.h> // Provides fd_set, select, FD_ZERO, etc.
 #include "strptime.h" // https://github.com/treeswift/strptime
-// S_IFLNK is missing in standard MinGW headers. Define it conditionally.
-#ifndef S_IFLNK
-#define S_IFLNK 0xA000 // Placeholder value, often defined this way in POSIX headers
-#endif
 #include <windows.h>    // Required for CreateSymbolicLinkW
 #endif
 
@@ -308,6 +304,32 @@ DEBUG((">void create_subdirs(char *filename=%s)<",filename));
 }
 
 #ifdef _WIN32
+static void MapLastErrorWin(DWORD win_error)
+{
+	int mapped_errno = 0;
+	// Use the MinGW/MSVC helper to perform the default mapping first
+    // This function attempts to translate the win_error code to a POSIX errno.
+	switch (win_error) {       
+        case 1314: //ERROR_PRIVILEGE_NOT_HELD 1314 (0x522) A required privilege is not held by the client.
+        case 5: // ERROR_ACCESS_DENIED (5) - frequently maps to EACCES
+            mapped_errno = EACCES;  // POSIX equivalent is EPERM (Operation not permitted) or EACCES (Permission denied).
+            break;
+        case 3:  // 3: ERROR_PATH_NOT_FOUND (Could potentially be mis-mapped by MinGW)
+            mapped_errno = ENOENT;
+            break;
+        case 18: // 18: ERROR_NO_MORE_FILES (Used in find-first/next functions)
+            mapped_errno = ENOENT;
+            break;            
+        default:
+            // For all other errors, rely on the system's default mapping.
+            SetLastError(win_error);
+			mapped_errno = errno;
+            break;
+    }
+	// Set the errno variable to our mapped value
+    errno = mapped_errno;
+}	
+
 // Helper function to create the symbolic link using Windows API
 // Converts char* paths to wide characters (LPCWSTR) for the Windows API
 static int create_windows_symlink(const char *target, const char *linkname, DWORD dwFlags) {
@@ -339,7 +361,7 @@ static int create_windows_symlink(const char *target, const char *linkname, DWOR
         return 0; // Success
     } else {
         // Return -1 and set errno to indicate failure
-        SetLastError(GetLastError()); // Ensure errno is set based on Windows error
+        MapLastErrorWin(GetLastError()); // Ensure errno is set based on Windows error
         return -1; 
     }
 }
@@ -352,7 +374,7 @@ static int create_windows_hardlink(const char *target, const char *linkname) {
         return 0; // Success (POSIX link() returns 0 on success)
     } else {
         // Map Windows error to POSIX errno for consistent error handling
-        SetLastError(GetLastError()); 
+        MapLastErrorWin(GetLastError()); 
         return -1; // Failure (POSIX link() returns -1 on failure)
     }
 }
@@ -368,7 +390,7 @@ create_link(char *pfilename,
 	    const char *linkname, mode_t linktype,
 	    const char *prevlinkname)
 {
-DEBUG((">: create_link :\n"));
+DEBUG((">void create_link(char *pfilename =%s, const char *linkname=%s,\n\t mode_t linktype=%d, const char *prevlinkname=%s)\n",pfilename,linkname,linktype,prevlinkname));
     struct stat		stat_buf;
 	
 	// Manage prevlinkname: If the previous link path exists, delete it.

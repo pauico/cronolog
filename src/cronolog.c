@@ -94,7 +94,7 @@
 #define VERSION_MSG      "cronolog version " VERSION "\n"
 #endif
 
-
+#ifndef _WIN32
 #define USAGE_MSG 	"usage: %s [OPTIONS] logfile-spec\n" \
 			"\n" \
 			"   -H NAME,   --hardlink=NAME maintain a hard link from NAME to current log\n" \
@@ -112,13 +112,32 @@
 			"   -s TIME,   --start-time=TIME   starting time\n" \
 			"   -z TZ,     --time-zone=TZ  use TZ for timezone\n" \
 			"   -V,        --version       print version number, then exit\n"
-
+#else
+#define USAGE_MSG 	"usage: %s [OPTIONS] logfile-spec\n" \
+			"\n" \
+			"   -H NAME,   --hardlink=NAME maintain a hard link from NAME to current log\n" \
+			"   -S NAME,   --symlink=NAME  maintain a symbolic link from NAME to current log\n" \
+			"                                                 (REQUIRES ELEVATED PERMISSIONS)\n" \
+			"   -l NAME,   --link=NAME     same as -H/--hardlink\n" \
+			"   -h,        --help          print this help, then exit\n" \
+			"   -p PERIOD, --period=PERIOD set the rotation period explicitly\n" \
+			"   -d DELAY,  --delay=DELAY   set the rotation period delay\n" \
+			"   -o,        --once-only     create single output log from template (not rotated)\n" \
+			"   -x FILE,   --debug=FILE    write debug messages to FILE\n" \
+			"                              ( or to standard error if FILE is \"-\")\n" \
+			"   -a,        --american         American date formats\n" \
+			"   -e,        --european      European date formats (default)\n" \
+			"   -s TIME,   --start-time=TIME   starting time\n" \
+			"   -z TZ,     --time-zone=TZ  use TZ for timezone\n" \
+			"   -V,        --version       print version number, then exit\n"
+	
+#endif
 
 /* Definition of the short and long program options */
 
 char          *short_options = "ad:eop:s:z:H:P:S:l:hVx:";
 
-#ifndef _WIN32
+//#ifndef _WIN32
 struct option long_options[] =
 {
     { "american",	no_argument,		NULL, 'a' },
@@ -135,7 +154,7 @@ struct option long_options[] =
     { "help",      	no_argument,       	NULL, 'h' },
     { "version",   	no_argument,       	NULL, 'V' }
 };
-#endif
+//#endif
 
 /* Main function.
  */
@@ -162,11 +181,11 @@ main(int argc, char **argv)
     time_t	next_period = 0;
     int 	log_fd = -1;
 
-#ifndef _WIN32
+//#ifndef _WIN32
     while ((ch = getopt_long(argc, argv, short_options, long_options, NULL)) != EOF)
-#else
-    while ((ch = getopt(argc, argv, short_options)) != EOF)
-#endif        
+//#else
+    //while ((ch = getopt(argc, argv, short_options)) != EOF)
+//#endif        
     {
 	switch (ch)
 	{
@@ -186,18 +205,19 @@ main(int argc, char **argv)
 	    sprintf(tzbuf, "TZ=%s", optarg);
 	    putenv(tzbuf);
 	    break;
-
+#ifdef _WIN32
+	case 'l':
+#endif
 	case 'H':
 	    linkname = optarg;
 	    linktype = S_IFREG;
 	    break;
-
+#ifndef _WIN32
 	case 'l':
+#endif
 	case 'S':
 	    linkname = optarg;
-#ifndef _WIN32
 	    linktype = S_IFLNK;
-#endif        
 	    break;
 	    
 	case 'P':

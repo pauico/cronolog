@@ -91,6 +91,10 @@
 #else // _WIN32
 #include <io.h>		
 #include <direct.h>
+// S_IFLNK is missing in standard MinGW headers. Define it conditionally.
+#ifndef S_IFLNK
+#define S_IFLNK 0xA000 // Placeholder value, often defined this way in POSIX headers
+#endif
 #endif // _WIN32
 #include <string.h>
 #include <sys/types.h>
