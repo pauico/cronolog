@@ -139,7 +139,7 @@ new_log_file(const char *template, const char *linkname, mode_t linktype, const 
     struct tm 	*tm;
     int 	log_fd;
 
-DEBUG((">: new_log_file :\n"));
+DEBUG((">int new_log_file(const char *template=%s, const char *linkname=%s, mode_t linktype=%d, const char *prevlinkname=%s, PERIODICITY periodicity=%d, int period_multiple=%d, int period_delay=%d, char *pfilename=%s, size_t pfilename_len=%d, time_t time_now=%d, time_t *pnext_period=%d)\n", template, linkname, linktype, prevlinkname, periodicity, period_multiple, period_delay, pfilename, pfilename_len, time_now, pnext_period));
 
     start_of_period = start_of_this_period(time_now, periodicity, period_multiple);
     tm = localtime(&start_of_period);
@@ -197,6 +197,8 @@ DEBUG((">: new_log_file :\n"));
     {
 	create_link(pfilename, linkname, linktype, prevlinkname);
     }
+	
+	DEBUG(("<%d\n",log_fd));
     return log_fd;
 }
 
@@ -390,7 +392,7 @@ create_link(char *pfilename,
 	    const char *linkname, mode_t linktype,
 	    const char *prevlinkname)
 {
-DEBUG((">void create_link(char *pfilename =%s, const char *linkname=%s,\n\t mode_t linktype=%d, const char *prevlinkname=%s)\n",pfilename,linkname,linktype,prevlinkname));
+DEBUG((">void create_link(char *pfilename =%s, const char *linkname=%s, mode_t linktype=%d, const char *prevlinkname=%s)\n",pfilename,linkname,linktype,prevlinkname));
     struct stat		stat_buf;
 	
 	// Manage prevlinkname: If the previous link path exists, delete it.
@@ -494,7 +496,6 @@ DEBUG((">void create_link(char *pfilename =%s, const char *linkname=%s,\n\t mode
 PERIODICITY
 determine_periodicity(char *spec)
 {
-DEBUG((">: determine_periodicity :\n"));
     PERIODICITY	periodicity = ONCE_ONLY;
     char 	ch;
     
@@ -595,7 +596,6 @@ DEBUG((">: determine_periodicity :\n"));
 PERIODICITY 
 parse_timespec(char *optarg, int *p_period_multiple)
 {
-DEBUG((">: parse_timespec :\n"));
     PERIODICITY		periodicity	= INVALID_PERIOD;
     int			period_multiple = 1;
     char 		*p = optarg;
@@ -665,7 +665,7 @@ DEBUG((">: parse_timespec :\n"));
 time_t
 start_of_next_period(time_t time_now, PERIODICITY periodicity, int period_multiple)
 {
-DEBUG((">: start_of_next_period :\n"));
+DEBUG((">time_t start_of_next_period(time_t time_now=%d, PERIODICITY periodicity=%d, int period_multiple=%d)\n",time_now, periodicity, period_multiple));
     time_t	start_time;
     
     switch (periodicity)
@@ -702,6 +702,7 @@ DEBUG((">: start_of_next_period :\n"));
 	start_time = FAR_DISTANT_FUTURE;
 	break;
     }
+	DEBUG(("<f(%d,%d,%d)\n",start_time,periodicity, period_multiple));
     return start_of_this_period(start_time, periodicity, period_multiple);
 }
 
@@ -715,7 +716,7 @@ DEBUG((">: start_of_next_period :\n"));
 time_t
 start_of_this_period(time_t start_time, PERIODICITY periodicity, int period_multiple)
 {
-DEBUG((">: start_of_this_period :\n"));
+DEBUG((">time_t start_of_this_period(time_t start_time=%d, PERIODICITY periodicity=%d, int period_multiple=%d)\n",start_time, periodicity, period_multiple));
     struct tm	tm_initial;
     struct tm	tm_adjusted;
     int		expected_mday;
@@ -849,6 +850,8 @@ DEBUG((">: start_of_this_period :\n"));
     default:
 	break;
     }
+	
+	DEBUG(("<%d\n",start_time));
     return start_time;
 }
 
@@ -860,7 +863,6 @@ DEBUG((">: start_of_this_period :\n"));
 time_t
 mktime_from_utc(struct tm *t)
 {
-DEBUG((">: mktime_from_utc :\n"));
    time_t tl, tb;
 
    tl = mktime(t);
@@ -875,7 +877,6 @@ DEBUG((">: mktime_from_utc :\n"));
 static int
 check_end(const char *p)
 {
-DEBUG((">: check_end :\n"));
    if (!p)
       return 0;
    while (isspace(*p))
@@ -928,7 +929,6 @@ static char *american_date_formats[] =
 time_t
 parse_time(char *time_str, int use_american_date_formats)
 {
-DEBUG((">: parse_time :\n"));
    struct tm    tm;
    char		**date_formats;
    
@@ -969,7 +969,6 @@ print_debug_msg(char *msg, ...)
 char *
 timestamp(time_t thetime)
 {
-DEBUG((">: timestamp :\n"));
     static int	index = 0;
     static char	buffer[4][80];
     struct tm	*tm;
